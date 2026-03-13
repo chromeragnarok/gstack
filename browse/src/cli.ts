@@ -46,7 +46,7 @@ export function resolveServerScript(
   }
 
   // Legacy fallback for user-level installs
-  return path.resolve(env.HOME || '/tmp', '.claude/skills/gstack/browse/src/server.ts');
+  return path.resolve(env.HOME || '/tmp', '.codex/skills/gstack/browse/src/server.ts');
 }
 
 const SERVER_SCRIPT = resolveServerScript();

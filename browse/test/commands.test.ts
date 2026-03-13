@@ -426,8 +426,8 @@ describe('Status', () => {
 describe('CLI server script resolution', () => {
   test('prefers adjacent browse/src/server.ts for compiled project installs', () => {
     const root = fs.mkdtempSync('/tmp/gstack-cli-');
-    const execPath = path.join(root, '.claude/skills/gstack/browse/dist/browse');
-    const serverPath = path.join(root, '.claude/skills/gstack/browse/src/server.ts');
+    const execPath = path.join(root, '.codex/skills/gstack/browse/dist/browse');
+    const serverPath = path.join(root, '.codex/skills/gstack/browse/src/server.ts');
 
     fs.mkdirSync(path.dirname(execPath), { recursive: true });
     fs.mkdirSync(path.dirname(serverPath), { recursive: true });
@@ -437,6 +437,25 @@ describe('CLI server script resolution', () => {
       { HOME: path.join(root, 'empty-home') },
       '$bunfs/root',
       execPath
+    );
+
+    expect(resolved).toBe(serverPath);
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('falls back to home-level codex install when compiled path is unavailable', () => {
+    const root = fs.mkdtempSync('/tmp/gstack-cli-home-');
+    const home = path.join(root, 'home');
+    const serverPath = path.join(home, '.codex/skills/gstack/browse/src/server.ts');
+
+    fs.mkdirSync(path.dirname(serverPath), { recursive: true });
+    fs.writeFileSync(serverPath, '// home test server\n');
+
+    const resolved = resolveServerScript(
+      { HOME: home },
+      '$bunfs/root',
+      ''
     );
 
     expect(resolved).toBe(serverPath);
