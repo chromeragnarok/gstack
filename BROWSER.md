@@ -1,34 +1,34 @@
 # Browser — technical details
 
-This document covers the command reference and internals of gstack's headless browser.
+This document covers the command reference and internals of gstack's headless browser for Codex skills.
 
 ## Command reference
 
 | Category | Commands | What for |
 |----------|----------|----------|
 | Navigate | `goto`, `back`, `forward`, `reload`, `url` | Get to a page |
-| Read | `text`, `html`, `links`, `forms`, `accessibility` | Extract content |
-| Snapshot | `snapshot [-i] [-c] [-d N] [-s sel] [-D] [-a] [-o] [-C]` | Get refs, diff, annotate |
+| Read | `text`, `html`, `links`, `forms`, `accessibility` | Extract page content |
+| Snapshot | `snapshot [-i] [-c] [-d N] [-s sel] [-D] [-a] [-o] [-C]` | Get refs, diffs, and annotations |
 | Interact | `click`, `fill`, `select`, `hover`, `type`, `press`, `scroll`, `wait`, `viewport`, `upload` | Use the page |
 | Inspect | `js`, `eval`, `css`, `attrs`, `is`, `console`, `network`, `dialog`, `cookies`, `storage`, `perf` | Debug and verify |
-| Visual | `screenshot`, `pdf`, `responsive` | See what Claude sees |
+| Visual | `screenshot`, `pdf`, `responsive` | Capture visual state |
 | Compare | `diff <url1> <url2>` | Spot differences between environments |
-| Dialogs | `dialog-accept [text]`, `dialog-dismiss` | Control alert/confirm/prompt handling |
+| Dialogs | `dialog-accept [text]`, `dialog-dismiss` | Control alert, confirm, and prompt handling |
 | Tabs | `tabs`, `tab`, `newtab`, `closetab` | Multi-page workflows |
-| Cookies | `cookie-import`, `cookie-import-browser` | Import cookies from file or real browser |
+| Cookies | `cookie-import`, `cookie-import-browser` | Import cookies from file or a real browser |
 | Multi-step | `chain` (JSON from stdin) | Batch commands in one call |
 
-All selector arguments accept CSS selectors, `@e` refs after `snapshot`, or `@c` refs after `snapshot -C`. 50+ commands total plus cookie import.
+All selector arguments accept CSS selectors, `@e` refs after `snapshot`, or `@c` refs after `snapshot -C`.
 
 ## How it works
 
-gstack's browser is a compiled CLI binary that talks to a persistent local Chromium daemon over HTTP. The CLI is a thin client — it reads a state file, sends a command, and prints the response to stdout. The server does the real work via [Playwright](https://playwright.dev/).
+gstack's browser is a compiled CLI binary that talks to a persistent local Chromium daemon over HTTP. The CLI is a thin client: it reads a state file, sends a command, and prints the response to stdout. The server does the real work via [Playwright](https://playwright.dev/).
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
-│  Claude Code                                                    │
+│  Codex session                                                  │
 │                                                                 │
-│  "browse goto https://staging.myapp.com"                        │
+│  "use browse to test https://staging.myapp.com"                 │
 │       │                                                         │
 │       ▼                                                         │
 │  ┌──────────┐    HTTP POST     ┌──────────────┐                 │
@@ -44,194 +44,134 @@ gstack's browser is a compiled CLI binary that talks to a persistent local Chrom
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Lifecycle
+## Lifecycle
 
-1. **First call**: CLI checks `/tmp/browse-server.json` for a running server. None found — it spawns `bun run browse/src/server.ts` in the background. The server launches headless Chromium via Playwright, picks a port (9400-9410), generates a bearer token, writes the state file, and starts accepting HTTP requests. This takes ~3 seconds.
+1. First call: the CLI checks `/tmp/browse-server.json` for a running server. If none exists, it spawns `bun run browse/src/server.ts`, launches headless Chromium, writes the state file, and starts accepting commands.
+2. Subsequent calls: the CLI reads the state file, sends an HTTP POST with the bearer token, and prints the response. Typical round-trip is around 100-200ms.
+3. Idle shutdown: after 30 minutes with no commands, the server shuts down and cleans up the state file.
+4. Crash recovery: if Chromium dies, the CLI detects the dead server on the next call and starts a fresh one.
 
-2. **Subsequent calls**: CLI reads the state file, sends an HTTP POST with the bearer token, prints the response. ~100-200ms round trip.
+## Source map
 
-3. **Idle shutdown**: After 30 minutes with no commands, the server shuts down and cleans up the state file. Next call restarts it automatically.
-
-4. **Crash recovery**: If Chromium crashes, the server exits immediately (no self-healing — don't hide failure). The CLI detects the dead server on the next call and starts a fresh one.
-
-### Key components
-
-```
+```text
 browse/
 ├── src/
-│   ├── cli.ts              # Thin client — reads state file, sends HTTP, prints response
-│   ├── server.ts           # Bun.serve HTTP server — routes commands to Playwright
-│   ├── browser-manager.ts  # Chromium lifecycle — launch, tabs, ref map, crash handling
-│   ├── snapshot.ts         # Accessibility tree → @ref assignment → Locator map + diff/annotate/-C
-│   ├── read-commands.ts    # Non-mutating commands (text, html, links, js, css, is, dialog, etc.)
-│   ├── write-commands.ts   # Mutating commands (click, fill, select, upload, dialog-accept, etc.)
-│   ├── meta-commands.ts    # Server management, chain, diff, snapshot routing
-│   ├── cookie-import-browser.ts  # Decrypt + import cookies from real Chromium browsers
-│   ├── cookie-picker-routes.ts   # HTTP routes for interactive cookie picker UI
-│   ├── cookie-picker-ui.ts       # Self-contained HTML/CSS/JS for cookie picker
-│   └── buffers.ts          # CircularBuffer<T> + console/network/dialog capture
-├── test/                   # Integration tests + HTML fixtures
+│   ├── cli.ts                  # Reads state file, sends HTTP, prints response
+│   ├── server.ts               # Bun HTTP server and command router
+│   ├── browser-manager.ts      # Chromium lifecycle, tabs, refs, crash handling
+│   ├── snapshot.ts             # Accessibility tree, refs, diffing, annotations
+│   ├── read-commands.ts        # Non-mutating commands
+│   ├── write-commands.ts       # Mutating commands
+│   ├── meta-commands.ts        # Snapshot routing, chain, diff, server helpers
+│   ├── cookie-import-browser.ts
+│   ├── cookie-picker-routes.ts
+│   ├── cookie-picker-ui.ts
+│   └── buffers.ts
+├── test/                       # Integration tests + fixtures
 └── dist/
-    └── browse              # Compiled binary (~58MB, Bun --compile)
+    └── browse                  # Compiled binary
 ```
 
-### The snapshot system
+## Snapshot system
 
-The browser's key innovation is ref-based element selection, built on Playwright's accessibility tree API:
+The browser's main interaction model is ref-based selection:
 
-1. `page.locator(scope).ariaSnapshot()` returns a YAML-like accessibility tree
-2. The snapshot parser assigns refs (`@e1`, `@e2`, ...) to each element
-3. For each ref, it builds a Playwright `Locator` (using `getByRole` + nth-child)
-4. The ref-to-Locator map is stored on `BrowserManager`
-5. Later commands like `click @e3` look up the Locator and call `locator.click()`
+1. `page.locator(scope).ariaSnapshot()` returns a YAML-like accessibility tree.
+2. The snapshot parser assigns refs such as `@e1` and `@e2`.
+3. Each ref maps back to a Playwright `Locator`.
+4. Later commands such as `click @e3` resolve through that stored map.
 
-No DOM mutation. No injected scripts. Just Playwright's native accessibility API.
+This avoids DOM mutation and keeps the interaction model stable across repeated commands.
 
-**Extended snapshot features:**
-- `--diff` (`-D`): Stores each snapshot as a baseline. On the next `-D` call, returns a unified diff showing what changed. Use this to verify that an action (click, fill, etc.) actually worked.
-- `--annotate` (`-a`): Injects temporary overlay divs at each ref's bounding box, takes a screenshot with ref labels visible, then removes the overlays. Use `-o <path>` to control the output path.
-- `--cursor-interactive` (`-C`): Scans for non-ARIA interactive elements (divs with `cursor:pointer`, `onclick`, `tabindex>=0`) using `page.evaluate`. Assigns `@c1`, `@c2`... refs with deterministic `nth-child` CSS selectors. These are elements the ARIA tree misses but users can still click.
+Extended snapshot features:
 
-### Authentication
+- `-D` stores a baseline and shows a unified diff on the next diff call
+- `-a` captures an annotated screenshot with ref labels
+- `-C` includes cursor-interactive elements that are not obvious in the accessibility tree
 
-Each server session generates a random UUID as a bearer token. The token is written to the state file (`/tmp/browse-server.json`) with chmod 600. Every HTTP request must include `Authorization: Bearer <token>`. This prevents other processes on the machine from controlling the browser.
+## Multi-workspace support
 
-### Console, network, and dialog capture
+Each workspace gets its own Chromium process, tabs, cookies, and logs.
 
-The server hooks into Playwright's `page.on('console')`, `page.on('response')`, and `page.on('dialog')` events. All entries are kept in O(1) circular buffers (50,000 capacity each) and flushed to disk asynchronously via `Bun.write()`:
+If `CONDUCTOR_PORT` is set, the browse port is derived deterministically:
 
-- Console: `/tmp/browse-console.log`
-- Network: `/tmp/browse-network.log`
-- Dialog: `/tmp/browse-dialog.log`
-
-The `console`, `network`, and `dialog` commands read from the in-memory buffers, not disk.
-
-### Dialog handling
-
-Dialogs (alert, confirm, prompt) are auto-accepted by default to prevent browser lockup. The `dialog-accept` and `dialog-dismiss` commands control this behavior. For prompts, `dialog-accept <text>` provides the response text. All dialogs are logged to the dialog buffer with type, message, and action taken.
-
-### Multi-workspace support
-
-Each workspace gets its own isolated browser instance with its own Chromium process, tabs, cookies, and logs.
-
-If `CONDUCTOR_PORT` is set (e.g., by [Conductor](https://conductor.dev)), the browse port is derived deterministically:
-
-```
+```text
 browse_port = CONDUCTOR_PORT - 45600
 ```
 
 | Workspace | CONDUCTOR_PORT | Browse port | State file |
-|-----------|---------------|-------------|------------|
+|-----------|---------------:|------------:|------------|
 | Workspace A | 55040 | 9440 | `/tmp/browse-server-9440.json` |
 | Workspace B | 55041 | 9441 | `/tmp/browse-server-9441.json` |
 | No Conductor | — | 9400 (scan) | `/tmp/browse-server.json` |
 
 You can also set `BROWSE_PORT` directly.
 
-### Environment variables
+## Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BROWSE_PORT` | 0 (auto-scan 9400-9410) | Fixed port for the HTTP server |
-| `CONDUCTOR_PORT` | — | If set, browse port = this - 45600 |
-| `BROWSE_IDLE_TIMEOUT` | 1800000 (30 min) | Idle shutdown timeout in ms |
-| `BROWSE_STATE_FILE` | `/tmp/browse-server.json` | Path to state file |
-| `BROWSE_SERVER_SCRIPT` | auto-detected | Path to server.ts |
+| `BROWSE_PORT` | `0` | Fixed port for the HTTP server |
+| `CONDUCTOR_PORT` | unset | If set, browse port = this - 45600 |
+| `BROWSE_IDLE_TIMEOUT` | `1800000` | Idle shutdown timeout in ms |
+| `BROWSE_STATE_FILE` | `/tmp/browse-server.json` | Path to the server state file |
+| `BROWSE_SERVER_SCRIPT` | auto-detected | Path to `server.ts` |
 
-### Performance
+## Why CLI over MCP
 
-| Tool | First call | Subsequent calls | Context overhead per call |
-|------|-----------|-----------------|--------------------------|
-| Chrome MCP | ~5s | ~2-5s | ~2000 tokens (schema + protocol) |
-| Playwright MCP | ~3s | ~1-3s | ~1500 tokens (schema + protocol) |
-| **gstack browse** | **~3s** | **~100-200ms** | **0 tokens** (plain text stdout) |
+For local browser automation, a CLI keeps the interface small and cheap:
 
-The context overhead difference compounds fast. In a 20-command browser session, MCP tools burn 30,000-40,000 tokens on protocol framing alone. gstack burns zero.
+- lower context overhead than a full MCP protocol exchange
+- simpler failure modes than a long-lived browser protocol connection
+- easy to compose from Codex through `exec_command`
 
-### Why CLI over MCP?
-
-MCP (Model Context Protocol) works well for remote services, but for local browser automation it adds pure overhead:
-
-- **Context bloat**: every MCP call includes full JSON schemas and protocol framing. A simple "get the page text" costs 10x more context tokens than it should.
-- **Connection fragility**: persistent WebSocket/stdio connections drop and fail to reconnect.
-- **Unnecessary abstraction**: Claude Code already has a Bash tool. A CLI that prints to stdout is the simplest possible interface.
-
-gstack skips all of this. Compiled binary. Plain text in, plain text out. No protocol. No schema. No connection management.
-
-## Acknowledgments
-
-The browser automation layer is built on [Playwright](https://playwright.dev/) by Microsoft. Playwright's accessibility tree API, locator system, and headless Chromium management are what make ref-based interaction possible. The snapshot system — assigning `@ref` labels to accessibility tree nodes and mapping them back to Playwright Locators — is built entirely on top of Playwright's primitives. Thank you to the Playwright team for building such a solid foundation.
+Codex already has a terminal tool. A compiled CLI that prints plain text is the thinnest useful layer on top of it.
 
 ## Development
 
 ### Prerequisites
 
 - [Bun](https://bun.sh/) v1.0+
-- Playwright's Chromium (installed automatically by `bun install`)
+- Playwright Chromium, installed automatically by `./setup` or `bunx playwright install chromium`
 
 ### Quick start
 
 ```bash
-bun install              # install dependencies + Playwright Chromium
-bun test                 # run integration tests (~3s)
-bun run dev <cmd>        # run CLI from source (no compile)
-bun run build            # compile to browse/dist/browse
-```
-
-### Dev mode vs compiled binary
-
-During development, use `bun run dev` instead of the compiled binary. It runs `browse/src/cli.ts` directly with Bun, so you get instant feedback without a compile step:
-
-```bash
+bun install
+bun test
 bun run dev goto https://example.com
-bun run dev text
-bun run dev snapshot -i
-bun run dev click @e3
+bun run build
 ```
-
-The compiled binary (`bun run build`) is only needed for distribution. It produces a single ~58MB executable at `browse/dist/browse` using Bun's `--compile` flag.
 
 ### Running tests
 
 ```bash
-bun test                         # run all tests
-bun test browse/test/commands              # run command integration tests only
-bun test browse/test/snapshot              # run snapshot tests only
-bun test browse/test/cookie-import-browser # run cookie import unit tests only
+bun test
+bun test browse/test/commands
+bun test browse/test/snapshot
+bun test browse/test/cookie-import-browser
 ```
 
-Tests spin up a local HTTP server (`browse/test/test-server.ts`) serving HTML fixtures from `browse/test/fixtures/`, then exercise the CLI commands against those pages. 203 tests across 3 files, ~15 seconds total.
+Tests spin up a local HTTP server from `browse/test/test-server.ts`, serve HTML fixtures from `browse/test/fixtures/`, and exercise the CLI commands against those pages.
 
-### Source map
+## Deploying to the active skill
 
-| File | Role |
-|------|------|
-| `browse/src/cli.ts` | Entry point. Reads `/tmp/browse-server.json`, sends HTTP to the server, prints response. |
-| `browse/src/server.ts` | Bun HTTP server. Routes commands to the right handler. Manages idle timeout. |
-| `browse/src/browser-manager.ts` | Chromium lifecycle — launch, tab management, ref map, crash detection. |
-| `browse/src/snapshot.ts` | Parses accessibility tree, assigns `@e`/`@c` refs, builds Locator map. Handles `--diff`, `--annotate`, `-C`. |
-| `browse/src/read-commands.ts` | Non-mutating commands: `text`, `html`, `links`, `js`, `css`, `is`, `dialog`, `forms`, etc. Exports `getCleanText()`. |
-| `browse/src/write-commands.ts` | Mutating commands: `goto`, `click`, `fill`, `upload`, `dialog-accept`, `useragent` (with context recreation), etc. |
-| `browse/src/meta-commands.ts` | Server management, chain routing, diff (DRY via `getCleanText`), snapshot delegation. |
-| `browse/src/cookie-import-browser.ts` | Decrypt Chromium cookies via macOS Keychain + PBKDF2/AES-128-CBC. Auto-detects installed browsers. |
-| `browse/src/cookie-picker-routes.ts` | HTTP routes for `/cookie-picker/*` — browser list, domain search, import, remove. |
-| `browse/src/cookie-picker-ui.ts` | Self-contained HTML generator for the interactive cookie picker (dark theme, no frameworks). |
-| `browse/src/buffers.ts` | `CircularBuffer<T>` (O(1) ring buffer) + console/network/dialog capture with async disk flush. |
+The active skill lives at `~/.codex/skills/gstack/`. After making changes:
 
-### Deploying to the active skill
+1. Push your branch.
+2. Refresh the active skill checkout: `cd ~/.codex/skills/gstack && git fetch origin && git reset --hard origin/main`
+3. Rebuild: `cd ~/.codex/skills/gstack && bun run build`
 
-The active skill lives at `~/.claude/skills/gstack/`. After making changes:
+Or copy the binary directly:
 
-1. Push your branch
-2. Pull in the skill directory: `cd ~/.claude/skills/gstack && git pull`
-3. Rebuild: `cd ~/.claude/skills/gstack && bun run build`
+```bash
+cp browse/dist/browse ~/.codex/skills/gstack/browse/dist/browse
+```
 
-Or copy the binary directly: `cp browse/dist/browse ~/.claude/skills/gstack/browse/dist/browse`
+## Adding a new command
 
-### Adding a new command
-
-1. Add the handler in `read-commands.ts` (non-mutating) or `write-commands.ts` (mutating)
-2. Register the route in `server.ts`
-3. Add a test case in `browse/test/commands.test.ts` with an HTML fixture if needed
-4. Run `bun test` to verify
-5. Run `bun run build` to compile
+1. Add the handler in `read-commands.ts` or `write-commands.ts`.
+2. Register the route in `server.ts`.
+3. Add a test in `browse/test/commands.test.ts`, plus a fixture if needed.
+4. Run `bun test`.
+5. Run `bun run build`.

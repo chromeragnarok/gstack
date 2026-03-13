@@ -1,7 +1,7 @@
 {
   "name": "gstack",
   "version": "0.3.1",
-  "description": "Garry's Stack — Claude Code skills + fast headless browser. One repo, one install, entire AI engineering workflow.",
+  "description": "Garry's Stack — Codex skills + fast headless browser. One repo, one install, entire AI engineering workflow.",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -27,7 +27,7 @@
     "playwright",
     "headless",
     "cli",
-    "claude",
+    "codex",
     "ai-agent",
     "devtools"
   ]

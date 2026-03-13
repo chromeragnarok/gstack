@@ -11,7 +11,7 @@ bun run build        # compile binary to browse/dist/browse
 
 ## Project structure
 
-```
+```text
 gstack/
 ├── browse/          # Headless browser CLI (Playwright)
 │   ├── src/         # CLI + server + commands
@@ -19,20 +19,20 @@ gstack/
 │   └── dist/        # Compiled binary
 ├── ship/            # Ship workflow skill
 ├── review/          # PR review skill
-├── plan-ceo-review/ # /plan-ceo-review skill
-├── plan-eng-review/ # /plan-eng-review skill
+├── plan-ceo-review/ # Founder-mode plan review skill
+├── plan-eng-review/ # Engineering-mode plan review skill
 ├── retro/           # Retrospective skill
-├── setup            # One-time setup: build binary + symlink skills
-├── SKILL.md         # Browse skill (Claude discovers this)
+├── setup            # One-time setup: build binary + link sibling skills
+├── SKILL.md         # Root gstack skill entrypoint
 └── package.json     # Build scripts for browse
 ```
 
 ## Deploying to the active skill
 
-The active skill lives at `~/.claude/skills/gstack/`. After making changes:
+The active skill lives at `~/.codex/skills/gstack/`. After making changes:
 
-1. Push your branch
-2. Fetch and reset in the skill directory: `cd ~/.claude/skills/gstack && git fetch origin && git reset --hard origin/main`
-3. Rebuild: `cd ~/.claude/skills/gstack && bun run build`
+1. Push your branch.
+2. Refresh the active skill checkout: `cd ~/.codex/skills/gstack && git fetch origin && git reset --hard origin/main`
+3. Rebuild: `cd ~/.codex/skills/gstack && bun run build`
 
-Or copy the binary directly: `cp browse/dist/browse ~/.claude/skills/gstack/browse/dist/browse`
+Or copy the binary directly: `cp browse/dist/browse ~/.codex/skills/gstack/browse/dist/browse`
