@@ -1,78 +1,79 @@
 ---
 name: review
-version: 1.0.0
-description: |
-  Pre-landing PR review. Analyzes diff against main for SQL safety, LLM trust
-  boundary violations, conditional side effects, and other structural issues.
-allowed-tools:
-  - Bash
-  - Read
-  - Edit
-  - Write
-  - Grep
-  - Glob
-  - AskUserQuestion
+description: Pre-landing diff review focused on structural bugs, trust boundaries, and hidden risks.
+metadata:
+  short-description: Review the branch diff before landing
 ---
 
-# Pre-Landing PR Review
+# review
 
-You are running the `/review` workflow. Analyze the current branch's diff against main for structural issues that tests don't catch.
+Use this skill to review the current branch against `origin/main` before landing changes.
 
----
+## Workflow
 
-## Step 1: Check branch
+### 1. Check branch state
 
-1. Run `git branch --show-current` to get the current branch.
-2. If on `main`, output: **"Nothing to review — you're on main or have no changes against main."** and stop.
-3. Run `git fetch origin main --quiet && git diff origin/main --stat` to check if there's a diff. If no diff, output the same message and stop.
-
----
-
-## Step 2: Read the checklist
-
-Read `.claude/skills/review/checklist.md`.
-
-**If the file cannot be read, STOP and report the error.** Do not proceed without the checklist.
-
----
-
-## Step 3: Get the diff
-
-Fetch the latest main to avoid false positives from a stale local main:
+Run:
 
 ```bash
+git branch --show-current
 git fetch origin main --quiet
+git diff origin/main --stat
 ```
 
-Run `git diff origin/main` to get the full diff. This includes both committed and uncommitted changes against the latest main.
+If the branch is `main` or there is no diff, stop with:
 
----
+`Nothing to review — you're on main or have no changes against main.`
 
-## Step 4: Two-pass review
+### 2. Read the checklist
 
-Apply the checklist against the diff in two passes:
+Read `review/checklist.md`.
 
-1. **Pass 1 (CRITICAL):** SQL & Data Safety, LLM Output Trust Boundary
-2. **Pass 2 (INFORMATIONAL):** Conditional Side Effects, Magic Numbers & String Coupling, Dead Code & Consistency, LLM Prompt Issues, Test Gaps, View/Frontend
+Do not proceed without the checklist.
 
-Follow the output format specified in the checklist. Respect the suppressions — do NOT flag items listed in the "DO NOT flag" section.
+### 3. Read the full diff
 
----
+Run:
 
-## Step 5: Output findings
+```bash
+git diff origin/main
+```
 
-**Always output ALL findings** — both critical and informational. The user must see every issue.
+Review the complete diff before commenting. Do not flag issues already fixed in the diff.
 
-- If CRITICAL issues found: output all findings, then for EACH critical issue use a separate AskUserQuestion with the problem, your recommended fix, and options (A: Fix it now, B: Acknowledge, C: False positive — skip).
-  After all critical questions are answered, output a summary of what the user chose for each issue. If the user chose A (fix) on any issue, apply the recommended fixes. If only B/C were chosen, no action needed.
-- If only non-critical issues found: output findings. No further action needed.
-- If no issues found: output `Pre-Landing Review: No issues found.`
+### 4. Review in two passes
 
----
+Pass 1:
+- SQL & Data Safety
+- Race Conditions & Concurrency
+- LLM Output Trust Boundary
 
-## Important Rules
+Pass 2:
+- all informational categories from `review/checklist.md`
 
-- **Read the FULL diff before commenting.** Do not flag issues already addressed in the diff.
-- **Read-only by default.** Only modify files if the user explicitly chooses "Fix it now" on a critical issue. Never commit, push, or create PRs.
-- **Be terse.** One line problem, one line fix. No preamble.
-- **Only flag real problems.** Skip anything that's fine.
+### 5. Output findings
+
+Use the checklist output format exactly.
+
+If critical issues exist:
+- show all findings first
+- then ask one concise plain-text question per critical issue
+- include the problem, recommended fix, and options:
+  - `A) Fix it now`
+  - `B) Acknowledge and leave it`
+  - `C) False positive`
+
+If the user chooses `A`, apply the fix. Otherwise, leave the code unchanged.
+
+If only non-critical issues exist, just report them.
+
+If no issues exist, output:
+
+`Pre-Landing Review: No issues found.`
+
+## Rules
+
+- Read-only by default.
+- Be terse and specific.
+- Cite file and line when possible.
+- Only flag real issues.

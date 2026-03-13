@@ -1,128 +1,102 @@
 ---
 name: browse
-version: 1.1.0
-description: |
-  Fast headless browser for QA testing and site dogfooding. Navigate any URL, interact with
-  elements, verify page state, diff before/after actions, take annotated screenshots, check
-  responsive layouts, test forms and uploads, handle dialogs, and assert element states.
-  ~100ms per command. Use when you need to test a feature, verify a deployment, dogfood a
-  user flow, or file a bug with evidence.
-allowed-tools:
-  - Bash
-  - Read
-
+description: Fast headless browser control for page inspection, QA, screenshots, and interaction testing in Codex.
+metadata:
+  short-description: Browser QA workflow for Codex
 ---
 
-# browse: QA Testing & Dogfooding
+# browse
 
-Persistent headless Chromium. First call auto-starts (~3s), then ~100ms per command.
-State persists between calls (cookies, tabs, login sessions).
+Use this skill when the task is primarily browser interaction: checking a page load, clicking through a flow, capturing screenshots, inspecting console/network state, or verifying DOM changes.
 
-## Core QA Patterns
+## Preferred execution model
 
-### 1. Verify a page loads correctly
+Use the compiled `browse` binary through `exec_command`.
+
+## Setup
+
+Find the binary first:
+
 ```bash
-$B goto https://yourapp.com
-$B text                          # content loads?
-$B console                       # JS errors?
-$B network                       # failed requests?
-$B is visible ".main-content"    # key elements present?
+B=$(browse/bin/find-browse 2>/dev/null || ~/.codex/skills/gstack/browse/bin/find-browse 2>/dev/null)
+if [ -n "$B" ]; then
+  echo "READY: $B"
+else
+  echo "NEEDS_SETUP"
+fi
 ```
 
-### 2. Test a user flow
+If `NEEDS_SETUP`:
+1. Ask the user for permission to run `./setup`.
+2. Run `./setup` from the installed `gstack` directory.
+3. Re-run the check before continuing.
+
+## Standard operating procedure
+
+1. Go to the page.
+2. Snapshot interactive elements.
+3. Use `@e` or `@c` refs for interactions.
+4. Re-snapshot or diff after important actions.
+5. Check console, network, and explicit assertions before claiming success.
+
+## Core command patterns
+
 ```bash
-$B goto https://app.com/login
-$B snapshot -i                   # see all interactive elements
-$B fill @e3 "user@test.com"
-$B fill @e4 "password"
-$B click @e5                     # submit
-$B snapshot -D                   # diff: what changed after submit?
-$B is visible ".dashboard"       # success state present?
+$B goto https://example.com
+$B snapshot -i
+$B click @e3
+$B fill @e4 "value"
+$B snapshot -D
+$B console --errors
+$B network
+$B is visible ".success"
+$B screenshot /tmp/result.png
 ```
 
-### 3. Verify an action worked
+## High-value commands
+
+### Understand the page
+
 ```bash
-$B snapshot                      # baseline
-$B click @e3                     # do something
-$B snapshot -D                   # unified diff shows exactly what changed
+$B text
+$B html
+$B links
+$B forms
+$B accessibility
 ```
 
-### 4. Visual evidence for bug reports
+### Interact
+
 ```bash
-$B snapshot -i -a -o /tmp/annotated.png   # labeled screenshot
-$B screenshot /tmp/bug.png                # plain screenshot
-$B console                                # error log
+$B click @e3
+$B fill @e4 "text"
+$B select @e5 "Option"
+$B hover @e6
+$B type @e7 "hello"
+$B press Tab
 ```
 
-### 5. Find all clickable elements (including non-ARIA)
-```bash
-$B snapshot -C                   # finds divs with cursor:pointer, onclick, tabindex
-$B click @c1                     # interact with them
-```
+### Inspect and assert
 
-### 6. Assert element states
 ```bash
+$B console --errors
+$B network
 $B is visible ".modal"
-$B is enabled "#submit-btn"
-$B is disabled "#submit-btn"
-$B is checked "#agree-checkbox"
-$B is editable "#name-field"
-$B is focused "#search-input"
-$B js "document.body.textContent.includes('Success')"
+$B is enabled "#submit"
+$B attrs "#logo"
+$B css ".button" "background-color"
 ```
 
-### 7. Test responsive layouts
+### Visual output
+
 ```bash
-$B responsive /tmp/layout        # mobile + tablet + desktop screenshots
-$B viewport 375x812              # or set specific viewport
-$B screenshot /tmp/mobile.png
+$B screenshot /tmp/page.png
+$B snapshot -i -a -o /tmp/annotated.png
+$B responsive /tmp/layout
 ```
 
-### 8. Test file uploads
-```bash
-$B upload "#file-input" /path/to/file.pdf
-$B is visible ".upload-success"
-```
+## Notes
 
-### 9. Test dialogs
-```bash
-$B dialog-accept "yes"           # set up handler
-$B click "#delete-button"        # trigger dialog
-$B dialog                        # see what appeared
-$B snapshot -D                   # verify deletion happened
-```
-
-### 10. Compare environments
-```bash
-$B diff https://staging.app.com https://prod.app.com
-```
-
-## Snapshot Flags
-
-```
--i        Interactive elements only (buttons, links, inputs)
--c        Compact (no empty structural nodes)
--d <N>    Limit depth
--s <sel>  Scope to CSS selector
--D        Diff against previous snapshot
--a        Annotated screenshot with ref labels
--o <path> Output path for screenshot
--C        Cursor-interactive elements (@c refs)
-```
-
-Combine: `$B snapshot -i -a -C -o /tmp/annotated.png`
-
-Use @refs after snapshot: `$B click @e3`, `$B fill @e4 "value"`, `$B click @c1`
-
-## Full Command List
-
-**Navigate:** goto, back, forward, reload, url
-**Read:** text, html, links, forms, accessibility
-**Snapshot:** snapshot (with flags above)
-**Interact:** click, fill, select, hover, type, press, scroll, wait, wait --networkidle, wait --load, viewport, upload, cookie-import, dialog-accept, dialog-dismiss
-**Inspect:** js, eval, css, attrs, is, console, console --errors, network, dialog, cookies, storage, perf
-**Visual:** screenshot, pdf, responsive
-**Compare:** diff
-**Multi-step:** chain (pipe JSON array)
-**Tabs:** tabs, tab, newtab, closetab
-**Server:** status, stop, restart
+- `snapshot` is the default way to discover interactable elements.
+- Refs are invalidated after navigation. Re-run `snapshot` after `goto`.
+- If the user needs a systematic report rather than ad hoc browser work, use the `qa` skill instead.
