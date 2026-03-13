@@ -1,6 +1,7 @@
 node_modules/
 browse/dist/
 .gstack/
+.worktrees/
 /tmp/
 *.log
 bun.lock
